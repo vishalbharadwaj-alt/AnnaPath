@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Food Nutritionist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen flex flex-col items-center py-10">
+
+    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-slate-100">
+        <h1 class="text-3xl font-bold text-slate-800 mb-2">Food Scan AI 🍎</h1>
+        <p class="text-slate-500 mb-6">Upload a photo to see nutritional insights.</p>
+
+        <div class="space-y-4">
+            <input type="text" id="imagePath" placeholder="C:/path/to/your/pasta.jpg" 
+                   class="w-full p-3 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+            
+            <button onclick="sendToAI()" id="btn"
+                    class="w-full bg-blue-600 text-white font-semibold py-3 rounded-xl hover:bg-blue-700 transition">
+                Analyze Dish
+            </button>
+        </div>
+
+        <div id="loader" class="hidden mt-8 text-center text-blue-600 font-medium animate-pulse">
+            Analyzing your meal...
+        </div>
+
+        <div id="resultBox" class="hidden mt-8 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+            <h3 class="font-bold text-blue-800 mb-2">Nutritionist Report:</h3>
+            <p id="responseText" class="text-slate-700 text-sm leading-relaxed"></p>
+        </div>
+    </div>
+
+    <script>
+        async function sendToAI() {
+            const path = document.getElementById('imagePath').value;
+            const btn = document.getElementById('btn');
+            const resultBox = document.getElementById('resultBox');
+            const responseText = document.getElementById('responseText');
+            const loader = document.getElementById('loader');
+
+            if (!path) return alert("Please enter a file path!");
+
+            // UI State
+            btn.disabled = true;
+            loader.classList.remove('hidden');
+            resultBox.classList.add('hidden');
+
+            try {
+                const response = await fetch('YOUR_PRODUCTION_WEBHOOK_URL_HERE', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_path: path,
+                        question: "Analyze the nutritional value of this dish."
+                    })
+                });
+
+                const data = await response.json();
+                // If your n8n output is just text, use it directly. 
+                // If it's a JSON object, adjust to data.output or similar.
+                responseText.innerText = typeof data === 'string' ? data : JSON.stringify(data);
+                resultBox.classList.remove('hidden');
+            } catch (err) {
+                alert("Error connecting to n8n server.");
+            } finally {
+                btn.disabled = false;
+                loader.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>

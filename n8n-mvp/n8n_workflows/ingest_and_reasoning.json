@@ -1,0 +1,242 @@
+{
+  "name": "Ingest -> Cache Check -> OCR -> LLM -> Audit -> Respond",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ingest",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "http://mock-services:3000/cache/get?key={{ $json[\"body\"]?.text ? $json[\"body\"]?.text.replace(/[^a-z0-9]+/gi,'_').toLowerCase() : 'raw_input' }}",
+        "jsonParameters": true,
+        "options": {}
+      },
+      "id": "7",
+      "name": "CacheGet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json[\"found\"]}}",
+              "operation": "isTrue"
+            }
+          ]
+        }
+      },
+      "id": "8",
+      "name": "IfCacheHit",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "responseBody": "={{ $json[\"value\"] ? JSON.stringify($json[\"value\"]) : '' }}",
+        "options": {}
+      },
+      "id": "9",
+      "name": "RespondCached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [950, 220]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://mock-services:3000/ocr",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \"text\": $json[\"body\"]?.text || $json[\"body\"]?.image || '' }"
+      },
+      "id": "2",
+      "name": "OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [950, 380]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Normalize ingredients and build context\nconst body = $json[\"body\"] || {};\nconst ocr = $item(4).$node[\"OCR\"].json;\nconst ingredients = (ocr?.ingredients || []).map(i => i.replace(/[^a-z0-9_]/g,'_'));\n\nreturn [{\n  json: {\n    ingredients,\n    ocrConfidence: ocr?.confidence || 0,\n    userProfile: {id: body.userId || null, age: body.age || null, region: body.region || 'default', budget: body.budget || 'low'},\n    medicalHistory: body.medicalHistory || [],\n    rawText: ocr?.raw || body.text || '',\n    ocrRaw: ocr\n  }\n}];"
+      },
+      "id": "3",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 380]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://mock-services:3000/llm",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \"ingredients\": $json[\"ingredients\"], \"ocrConfidence\": $json[\"ocrConfidence\"], \"userProfile\": $json[\"userProfile\"], \"medicalHistory\": $json[\"medicalHistory\"] }"
+      },
+      "id": "4",
+      "name": "LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1450, 380]
+    },
+    {
+      "parameters": {
+        "functionCode": "const llm = $item(6).$node[\"LLM\"].json;\nconst ocrRaw = $json[\"ocrRaw\"];\n\nconst response = {\n  summary: llm.summaryPlainText,\n  bullets: llm.bullets,\n  riskScore: llm.riskScore,\n  uncertainties: llm.uncertainties,\n  alternatives: llm.alternatives,\n  explainability: llm.explainabilityNotes,\n  llmFull: llm,\n  ocrRaw\n};\n\n// Build a safe insert query (simple escaping for demo purposes)\nconst userId = $json[\"userProfile\"]?.id || null;\nconst region = $json[\"userProfile\"]?.region || null;\nconst rawText = ($json[\"rawText\"] || '').replace(/'/g, \"''\");\nconst ingredients = $json[\"ingredients\"] || [];\nconst ocrConfidence = $json[\"ocrConfidence\"] || 0;\nconst userVal = userId ? \"'\" + userId + \"'\" : 'NULL';\nconst regionVal = region ? \"'\" + region + \"'\" : 'NULL';\nconst insertQuery = `INSERT INTO audit_logs (user_id, region, input_raw, ingredients, ocr_confidence, llm_response) VALUES (${userVal}, ${regionVal}, '${rawText}', '{${ingredients.join(',')}}', ${ocrConfidence}, '${JSON.stringify(response).replace(/'/g, \"''\" )}' ) RETURNING id;`;\n\nreturn [{ json: { response, insertQuery } }];"
+      },
+      "id": "5",
+      "name": "FormatResponse",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1700, 380]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json[\"insertQuery\"] }}"
+      },
+      "id": "10",
+      "name": "PostgresInsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1950, 380]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://mock-services:3000/cache/set",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={ \"key\": $json[\"response\"]?.summary?.replace(/[^a-z0-9]+/gi,'_').toLowerCase(), \"value\": $json[\"response\"], \"ttl\": 86400 }"
+      },
+      "id": "11",
+      "name": "CacheSet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [2200, 380]
+    },
+    {
+      "parameters": {
+        "responseBody": "={{ $json[\"response\"]?.summary }}",
+        "options": {}
+      },
+      "id": "6",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2450, 380]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CacheGet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CacheGet": {
+      "main": [
+        [
+          {
+            "node": "IfCacheHit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IfCacheHit": {
+      "main": [
+        [
+          {
+            "node": "RespondCached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OCR",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "OCR": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM": {
+      "main": [
+        [
+          {
+            "node": "FormatResponse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FormatResponse": {
+      "main": [
+        [
+          {
+            "node": "PostgresInsert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CacheSet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1"
+}

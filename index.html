@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AnnaPath – AI Ingredient Health Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <header class="navbar">
+    <div class="brand">
+      <img src="assets/logo1.png" alt="AnnaPath logo" class="logo">
+      <span class="brand-name">AnnaPath</span>
+    </div>
+  </header>
+
+  <!-- HERO SECTION -->
+  <section class="hero">
+    <div class="hero-text">
+      <h1>Understand What You Eat 🌿</h1>
+      <p>
+        AnnaPath helps you decode ingredients and understand
+        whether a product is suitable for your health.
+      </p>
+      <button class="primary-btn">Analyze Ingredients</button>
+    </div>
+    <div class="hero-image">
+      <img src="assets/hero.png" alt="Ingredient analysis illustration">
+    </div>
+  </section>
+
+  <!-- AFTER HERO SECTION -->
+  <section class="after-hero">
+    <div class="after-hero-image">
+      <img src="assets/afterhero.svg" alt="How AnnaPath works">
+    </div>
+    <div class="after-hero-text">
+      <h2>🧠 How AnnaPath Helps You</h2>
+      <p>
+        Food labels are confusing. Scientific names make it harder.
+        AnnaPath uses AI to explain ingredients in simple language
+        and highlights what matters for <strong>you</strong>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ANALYZER SECTION -->
+  <section class="analyzer">
+    <h2>🧾 Analyze Ingredients</h2>
+
+    <label for="ingredients" class="visually-hidden">Ingredients</label>
+    <textarea id="ingredients" aria-label="Ingredients list" placeholder="Paste ingredients here..."></textarea>
+
+    <label for="health" class="visually-hidden">Target audience</label>
+    <select id="health">
+      <option value="" disabled selected>🎯 Who is this food for?</option>
+      <option value="general">General</option>
+      <option value="diabetes">Diabetes</option>
+      <option value="hypertension">High Blood Pressure</option>
+      <option value="allergy">Allergy</option>
+    </select>
+
+    <div class="analyzer-row">
+      <div class="webhook-config">
+        <label for="webhook-url" class="visually-hidden">Webhook URL</label>
+        <input id="webhook-url" placeholder="Webhook URL (optional) — default: http://localhost:3001/webhook/ingest" aria-label="Webhook URL">
+      </div>
+
+      <div class="image-uploader">
+        <button id="add-image-btn" class="secondary-btn" title="Add image" aria-label="Add image">＋</button>
+        <input id="image-input" type="file" accept="image/*" hidden>
+        <div id="image-preview" class="image-preview" hidden aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <input id="userInput" placeholder="Quick test input (e.g., Sugar salt)" class="quick-input" aria-label="Quick input">
+      <button id="analyze-btn" class="primary-btn" type="button">🔍 Analyze</button>
+      <button id="clear-btn" class="secondary-btn" type="button">Clear</button>
+      <button id="auto-send-btn" class="secondary-btn" type="button">Auto Send</button>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="results" id="results" role="region" aria-live="polite" aria-label="AI Insight">
+    <h2>📊 AI Insight</h2>
+
+    <p class="empty">No results yet — paste ingredients above and click Analyze.</p>
+
+    <div class="loading" id="loading" hidden>Analyzing…</div>
+    <div id="results-list"></div>
+
+    <div id="ai-details" hidden>
+      <h3>AI Summary</h3>
+      <div id="ai-summary"></div>
+      <div id="summary"></div>
+      <div id="risk-score"></div>
+      <div id="ai-bullets"></div>
+      <div id="details"></div>
+    </div>
+
+    <p class="uncertainty" id="uncertainty" hidden>🤔 AI note: Effects depend on quantity and individual health conditions.</p>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <p>
+      AnnaPath is for educational purposes only.  
+      Always consult a healthcare professional.
+    </p>
+  </footer>
+
+  <div id="app">
+    <div class="food-tool">
+      <label for="food-select">Choose a food:</label>
+      <select id="food-select">
+        <option value="">Loading foods…</option>
+      </select>
+      <button id="refresh-foods" class="secondary-btn" title="Refresh">Refresh</button>
+      <button id="send-food-to-webhook" class="secondary-btn">Send ingredients to webhook</button>
+    </div>
+
+    <h3>Result:</h3>
+    <pre id="output">Response will appear here...</pre>
+
+    <h3>Food details</h3>
+    <div id="food-details">Select a food to view details.</div>
+  </div>
+
+  <script>
+  async function sendToN8n(payload) {
+    const webhookInput = document.getElementById('webhook-url');
+    const webhook = webhookInput && webhookInput.value ? webhookInput.value : 'http://localhost:3001/webhook/ingest';
+
+    const body = payload ? payload : { text: document.getElementById('userInput') ? document.getElementById('userInput').value : '' };
+    const outputDiv = document.getElementById('output');
+    outputDiv.innerText = 'Sending...';
+
+    try {
+      const resp = await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        outputDiv.innerText = `HTTP ${resp.status}: ${text}`;
+        return;
+      }
+
+      const data = await resp.json();
+
+      const parts = [];
+      if (data.summaryPlainText) parts.push(`Summary: ${data.summaryPlainText}`);
+      if (data.bullets && data.bullets.length) parts.push(`\nBullets:\n- ${data.bullets.join('\n- ')}`);
+      if (typeof data.riskScore !== 'undefined') parts.push(`\nRisk score: ${data.riskScore}`);
+      if (data.uncertainties && data.uncertainties.length) parts.push(`\nUncertainties:\n- ${data.uncertainties.join('\n- ')}`);
+      if (data.explainabilityNotes) parts.push(`\nNotes: ${data.explainabilityNotes}`);
+
+      outputDiv.innerText = parts.length ? parts.join('\n') : JSON.stringify(data, null, 2);
+    } catch (err) {
+      outputDiv.innerText = `Error: ${err.message}\n\nHint: Make sure the mock server is running on port 3001 and CORS is allowed.`;
+    }
+  }
+
+  async function sendData() {
+    const input = document.getElementById('userInput')?.value || document.getElementById('ingredients')?.value || '';
+    const display = document.getElementById('results');
+
+    try {
+        const response = await fetch('http://localhost:3001/webhook/ingest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                text: input,
+                medicalHistory: ["diabetes"] // Testing logic
+            })
+        });
+
+        const data = await response.json();
+        
+        // Populate summary and details UI elements
+        const summaryText = data.summaryPlainText || data.summary || '';
+        const summaryEl = document.getElementById('summary');
+        if (summaryEl) summaryEl.innerText = summaryText;
+        const aiSummaryEl = document.getElementById('ai-summary');
+        if (aiSummaryEl) aiSummaryEl.innerText = summaryText;
+
+        const riskElement = document.getElementById('risk-score');
+        if (riskElement) {
+          const score = typeof data.riskScore !== 'undefined' ? data.riskScore : '';
+          riskElement.innerText = `Risk Level: ${score}%`;
+          if (score !== '') riskElement.style.color = (score > 50 ? 'red' : 'green');
+        }
+
+        const bulletsArr = data.bullets || [];
+        const detailsEl = document.getElementById('details');
+        if (detailsEl) detailsEl.innerHTML = bulletsArr.length ? `<ul>${bulletsArr.map(b => `<li>${b}</li>`).join('')}</ul>` : '';
+
+        // Keep a small visual card in the results area for quick confirmation
+        display.innerHTML = `
+            <div style="border-left: 5px solid #28a745; padding-left: 10px;">
+                <h4>Summary</h4>
+                <p>${summaryText}</p>
+                <strong>Risk Score: ${data.riskScore}%</strong>
+            </div>
+        `;
+    } catch (err) {
+        console.error("Automation failed:", err);
+    }
+  }
+
+  async function fetchFoods() {
+    const select = document.getElementById('food-select');
+    select.innerHTML = '<option value="">Loading…</option>';
+    try {
+      const webhookInput = document.getElementById('webhook-url');
+      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
+      const resp = await fetch(`${apiBase}/db/foods`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const foods = await resp.json();
+      select.innerHTML = '<option value="">— select a food —</option>';
+      foods.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f.food_id;
+        opt.text = `${f.food_name} (${f.region})`;
+        select.appendChild(opt);
+      });
+    } catch (e) {
+      select.innerHTML = `<option value="">Error loading foods</option>`;
+      document.getElementById('food-details').innerText = `Error fetching foods: ${e.message}`;
+    }
+  }
+
+  async function showFoodDetails(id) {
+    const details = document.getElementById('food-details');
+    if (!id) { details.innerText = 'Select a food to view details.'; return; }
+    details.innerText = 'Loading…';
+    try {
+      const webhookInput = document.getElementById('webhook-url');
+      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
+      const resp = await fetch(`${apiBase}/db/foods/${id}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const parts = [];
+      parts.push(`Name: ${data.food_name} (${data.region})`);
+      if (data.ingredients && data.ingredients.length) {
+        parts.push('\nIngredients:');
+        data.ingredients.forEach(i => parts.push(`- ${i.common_name} — ${i.impact_level}${i.reason ? `: ${i.reason}` : ''}`));
+      } else {
+        parts.push('\nNo ingredient data');
+      }
+      details.innerText = parts.join('\n');
+    } catch (err) {
+      details.innerText = `Error loading food: ${err.message}`;
+    }
+  }
+
+  document.getElementById('food-select').addEventListener('change', (e) => showFoodDetails(e.target.value));
+  document.getElementById('refresh-foods').addEventListener('click', fetchFoods);
+  document.getElementById('send-food-to-webhook').addEventListener('click', async () => {
+    const id = document.getElementById('food-select').value;
+    if (!id) return alert('Choose a food first');
+    try {
+      const webhookInput = document.getElementById('webhook-url');
+      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
+      const resp = await fetch(`${apiBase}/db/foods/${id}`);
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`HTTP ${resp.status}: ${text}`);
+      }
+      const contentType = resp.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await resp.text();
+        throw new Error(`Expected JSON response but got: ${text}`);
+      }
+      const data = await resp.json();
+      const ingredients = (data.ingredients || []).map(i => i.common_name).join(', ');
+      sendToN8n({ text: ingredients });
+    } catch (e) {
+      document.getElementById('output').innerText = `Error preparing webhook payload: ${e.message}`;
+    }
+  });
+
+  // Auto-send test button
+  document.getElementById('auto-send-btn').addEventListener('click', sendData);
+
+  // Initialize on load
+  window.addEventListener('load', () => {
+    fetchFoods();
+  });
+  </script>
+
+  <script src="script.js"></script>
+</body>
+</html>

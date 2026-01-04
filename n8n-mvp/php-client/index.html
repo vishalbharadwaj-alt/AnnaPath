@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Ingredient Co-pilot - Test</title>
+</head>
+<body>
+  <h2>Ingredient Co-pilot — Submit an input</h2>
+  <form method="post" action="submit.php" enctype="multipart/form-data">
+    <label>Text (ingredient list or label):<br/>
+      <textarea name="text" rows="4" cols="60"></textarea>
+    </label><br/><br/>
+
+    <label>Image (photo of label) : <input name="image" type="file" accept="image/*"></label><br/><br/>
+
+    <label>User ID: <input name="userId" /></label> (optional)<br/>
+    <label>Region: <input name="region" value="default" /></label> (optional)<br/>
+
+    <fieldset>
+      <legend>Medical history (optional)</legend>
+      <label><input type="checkbox" name="medicalHistory[]" value="diabetes"> Diabetes</label>
+      <label><input type="checkbox" name="medicalHistory[]" value="hypertension"> Hypertension</label>
+      <label><input type="checkbox" name="medicalHistory[]" value="allergy_gluten"> Gluten allergy</label>
+    </fieldset>
+
+    <br/>
+    <button type="submit">Send to n8n</button>
+  </form>
+
+  <hr/>
+  <p>See <a href="README.md">README</a> for WAMP-specific notes.</p>
+</body>
+</html>
