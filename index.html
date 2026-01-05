@@ -46,15 +46,28 @@
     </div>
   </section>
 
-  <!-- ANALYZER SECTION -->
-  <section class="analyzer">
-    <h2>🧾 Analyze Ingredients</h2>
+  <section class="analyzer" id="analyzer-section">
+    <h2>🧾 Analyze Your Food</h2>
+    
+    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+        <button id="mode-text" class="secondary-btn active-mode" style="border: 2px solid #28a745;">Text Ingredients</button>
+        <button id="mode-image" class="secondary-btn">Image Scan</button>
+    </div>
 
-    <label for="ingredients" class="visually-hidden">Ingredients</label>
-    <textarea id="ingredients" aria-label="Ingredients list" placeholder="Paste ingredients here..."></textarea>
+    <div id="input-container-text">
+        <label for="ingredients" class="visually-hidden">Ingredients</label>
+        <textarea id="ingredients" aria-label="Ingredients list" placeholder="Paste ingredients here (e.g. Sugar, Salt, Palm Oil)..."></textarea>
+    </div>
+
+    <div id="input-container-image" hidden>
+        <label for="imagePath" style="display:block; margin-bottom:5px; font-weight:bold;">Image File Path:</label>
+        <input type="text" id="imagePath" placeholder="C:/Users/Name/Pictures/food.jpg" 
+               style="width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 15px;">
+        <p style="font-size: 0.8rem; color: #666;">Note: Enter the local file path for the n8n workflow to read.</p>
+    </div>
 
     <label for="health" class="visually-hidden">Target audience</label>
-    <select id="health">
+    <select id="health" style="margin-top: 10px;">
       <option value="" disabled selected>🎯 Who is this food for?</option>
       <option value="general">General</option>
       <option value="diabetes">Diabetes</option>
@@ -65,21 +78,13 @@
     <div class="analyzer-row">
       <div class="webhook-config">
         <label for="webhook-url" class="visually-hidden">Webhook URL</label>
-        <input id="webhook-url" placeholder="Webhook URL (optional) — default: http://localhost:3001/webhook/ingest" aria-label="Webhook URL">
-      </div>
-
-      <div class="image-uploader">
-        <button id="add-image-btn" class="secondary-btn" title="Add image" aria-label="Add image">＋</button>
-        <input id="image-input" type="file" accept="image/*" hidden>
-        <div id="image-preview" class="image-preview" hidden aria-hidden="true"></div>
+        <input id="webhook-url" placeholder="Webhook URL (Text default: Port 3001 | Image default: Port 5678)" aria-label="Webhook URL">
       </div>
     </div>
 
     <div class="action-row">
-      <input id="userInput" placeholder="Quick test input (e.g., Sugar salt)" class="quick-input" aria-label="Quick input">
       <button id="analyze-btn" class="primary-btn" type="button">🔍 Analyze</button>
       <button id="clear-btn" class="secondary-btn" type="button">Clear</button>
-      <button id="auto-send-btn" class="secondary-btn" type="button">Auto Send</button>
     </div>
   </section>
 
@@ -130,170 +135,257 @@
   </div>
 
   <script>
-  async function sendToN8n(payload) {
-    const webhookInput = document.getElementById('webhook-url');
-    const webhook = webhookInput && webhookInput.value ? webhookInput.value : 'http://localhost:3001/webhook/ingest';
+    // --- UI TOGGLE LOGIC ---
+    const modeTextBtn = document.getElementById('mode-text');
+    const modeImageBtn = document.getElementById('mode-image');
+    const containerText = document.getElementById('input-container-text');
+    const containerImage = document.getElementById('input-container-image');
+    let currentMode = 'text'; // 'text' or 'image'
 
-    const body = payload ? payload : { text: document.getElementById('userInput') ? document.getElementById('userInput').value : '' };
-    const outputDiv = document.getElementById('output');
-    outputDiv.innerText = 'Sending...';
+    modeTextBtn.addEventListener('click', () => {
+        currentMode = 'text';
+        containerText.hidden = false;
+        containerImage.hidden = true;
+        modeTextBtn.style.border = "2px solid #28a745";
+        modeImageBtn.style.border = "1px solid #ccc";
+    });
 
-    try {
-      const resp = await fetch(webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+    modeImageBtn.addEventListener('click', () => {
+        currentMode = 'image';
+        containerText.hidden = true;
+        containerImage.hidden = false;
+        modeImageBtn.style.border = "2px solid #28a745";
+        modeTextBtn.style.border = "1px solid #ccc";
+    });
 
-      if (!resp.ok) {
-        const text = await resp.text();
-        outputDiv.innerText = `HTTP ${resp.status}: ${text}`;
-        return;
-      }
+    // --- MAIN ANALYZE FUNCTION ---
+    async function handleAnalysis() {
+        const resultSection = document.getElementById('ai-details');
+        const emptyMsg = document.getElementById('empty-msg');
+        const loader = document.getElementById('loader');
+        const customWebhook = document.getElementById('webhook-url').value;
+        const outputPre = document.getElementById('output');
 
-      const data = await resp.json();
+        // Reset UI
+        resultSection.hidden = true;
+        emptyMsg.hidden = true;
+        loader.classList.remove('hidden');
+        loader.hidden = false;
 
-      const parts = [];
-      if (data.summaryPlainText) parts.push(`Summary: ${data.summaryPlainText}`);
-      if (data.bullets && data.bullets.length) parts.push(`\nBullets:\n- ${data.bullets.join('\n- ')}`);
-      if (typeof data.riskScore !== 'undefined') parts.push(`\nRisk score: ${data.riskScore}`);
-      if (data.uncertainties && data.uncertainties.length) parts.push(`\nUncertainties:\n- ${data.uncertainties.join('\n- ')}`);
-      if (data.explainabilityNotes) parts.push(`\nNotes: ${data.explainabilityNotes}`);
+        try {
+            let url, payload;
 
-      outputDiv.innerText = parts.length ? parts.join('\n') : JSON.stringify(data, null, 2);
-    } catch (err) {
-      outputDiv.innerText = `Error: ${err.message}\n\nHint: Make sure the mock server is running on port 3001 and CORS is allowed.`;
+            if (currentMode === 'text') {
+                // --- TEXT MODE (Uses Mock Server or Custom) ---
+                const textVal = document.getElementById('ingredients').value;
+                if (!textVal) throw new Error("Please paste ingredients first!");
+
+                // Default to Port 3001 (Mock) if no URL provided
+                url = customWebhook || 'http://localhost:3001/webhook/ingest';
+                payload = { 
+                    text: textVal,
+                    medicalHistory: [document.getElementById('health').value || "general"]
+                };
+
+            } else {
+                // --- IMAGE MODE (Uses n8n Production Webhook) ---
+                const pathVal = document.getElementById('imagePath').value;
+                if (!pathVal) throw new Error("Please enter an image file path!");
+
+                // Default to Port 5678 (Real n8n) if no URL provided
+                // REPLACE THIS WITH YOUR ACTUAL N8N WEBHOOK TEST URL IF DIFFERENT
+                url = customWebhook || 'http://localhost:5678/webhook-test/your-webhook-id'; 
+                
+                payload = {
+                    image_path: pathVal,
+                    question: "Analyze the nutritional value of this dish."
+                };
+            }
+
+            // Send Request
+            console.log(`Sending to ${url}...`, payload);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Server Error (${response.status}): ${errText}`);
+            }
+
+            // Parse Response and normalize n8n/workflow outputs
+            const contentType = (response.headers.get("content-type") || '').toLowerCase();
+            let raw;
+            if (contentType.includes("application/json")) {
+                raw = await response.json();
+            } else {
+                // Fallback for plain text
+                const text = await response.text();
+                raw = { summaryPlainText: text, riskScore: 0, bullets: [] };
+            }
+
+            // Normalize common n8n / webhook response shapes:
+            // - [ { body: {...} } ]  (n8n often returns array of items)
+            // - { body: {...} } or { json: {...} }
+            // - { output: {...} } or { result: {...} }
+            let data = raw;
+            try {
+                if (Array.isArray(raw) && raw.length > 0) {
+                    const first = raw[0];
+                    if (first.body && typeof first.body === 'object') data = first.body;
+                    else if (first.json && typeof first.json === 'object') data = first.json;
+                    else if (first.output && typeof first.output === 'object') data = first.output;
+                    else data = first;
+                } else if (raw && typeof raw === 'object') {
+                    if (raw.body && typeof raw.body === 'object') data = raw.body;
+                    else if (raw.json && typeof raw.json === 'object') data = raw.json;
+                    else if (raw.output && typeof raw.output === 'object') data = raw.output;
+                    else if (raw.data && Array.isArray(raw.data) && raw.data[0]) data = raw.data[0];
+                }
+            } catch (e) {
+                console.warn('Normalization failed, using raw response', e);
+                data = raw;
+            }
+
+            // --- RENDER RESULTS ---
+            renderResults(data);
+
+        } catch (err) {
+            console.error(err);
+            alert("Error: " + err.message);
+            emptyMsg.hidden = false;
+            emptyMsg.innerText = "Error: " + err.message;
+        } finally {
+            loader.hidden = true;
+            loader.classList.add('hidden');
+        }
     }
-  }
 
-  async function sendData() {
-    const input = document.getElementById('userInput')?.value || document.getElementById('ingredients')?.value || '';
-    const display = document.getElementById('results');
-
-    try {
-        const response = await fetch('http://localhost:3001/webhook/ingest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                text: input,
-                medicalHistory: ["diabetes"] // Testing logic
-            })
-        });
-
-        const data = await response.json();
-        
-        // Populate summary and details UI elements
-        const summaryText = data.summaryPlainText || data.summary || '';
+    function renderResults(data) {
+        const resultSection = document.getElementById('ai-details');
         const summaryEl = document.getElementById('summary');
-        if (summaryEl) summaryEl.innerText = summaryText;
-        const aiSummaryEl = document.getElementById('ai-summary');
-        if (aiSummaryEl) aiSummaryEl.innerText = summaryText;
+        const riskEl = document.getElementById('risk-score');
+        const detailsEl = document.getElementById('details');
+        const outputPre = document.getElementById('output');
 
-        const riskElement = document.getElementById('risk-score');
-        if (riskElement) {
-          const score = typeof data.riskScore !== 'undefined' ? data.riskScore : '';
-          riskElement.innerText = `Risk Level: ${score}%`;
-          if (score !== '') riskElement.style.color = (score > 50 ? 'red' : 'green');
+            // 1. Text Summary
+        // Accept many common keys that workflows may return
+        const summaryText = data.summaryPlainText || data.output || data.summary || data.summary_text || data.result || data.text || data.description || (typeof data === 'string' ? data : "Analysis complete.");
+        summaryEl.innerText = summaryText;
+
+        // 2. Risk Score
+        const riskVal = data.riskScore || data.risk_score || data.risk || data.score;
+        if (typeof riskVal !== 'undefined') {
+            riskEl.innerText = `Risk Level: ${riskVal}%`;
+            riskEl.style.color = (Number(riskVal) > 50) ? '#dc3545' : '#28a745';
+        } else {
+            riskEl.innerText = "";
         }
 
-        const bulletsArr = data.bullets || [];
-        const detailsEl = document.getElementById('details');
-        if (detailsEl) detailsEl.innerHTML = bulletsArr.length ? `<ul>${bulletsArr.map(b => `<li>${b}</li>`).join('')}</ul>` : '';
+        // 3. Bullets / Highlights
+        const bullets = data.bullets || data.highlights || data.points || data.items || [];
+        if (Array.isArray(bullets) && bullets.length > 0) {
+            detailsEl.innerHTML = `<ul style="margin-top:10px; padding-left:20px;">${bullets.map(b => `<li>${b}</li>`).join('')}</ul>`;
+        } else {
+            detailsEl.innerHTML = "";
+        }
 
-        // Keep a small visual card in the results area for quick confirmation
-        display.innerHTML = `
-            <div style="border-left: 5px solid #28a745; padding-left: 10px;">
-                <h4>Summary</h4>
-                <p>${summaryText}</p>
-                <strong>Risk Score: ${data.riskScore}%</strong>
-            </div>
-        `;
-    } catch (err) {
-        console.error("Automation failed:", err);
+        // 4. Raw Output (for debugging) — show the original response too for traceability
+        outputPre.innerText = JSON.stringify(raw || data, null, 2);
+
+        // Show Section
+        resultSection.hidden = false;
+        document.getElementById('uncertainty').hidden = false;
     }
-  }
 
-  async function fetchFoods() {
-    const select = document.getElementById('food-select');
-    select.innerHTML = '<option value="">Loading…</option>';
-    try {
-      const webhookInput = document.getElementById('webhook-url');
-      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
-      const resp = await fetch(`${apiBase}/db/foods`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const foods = await resp.json();
-      select.innerHTML = '<option value="">— select a food —</option>';
-      foods.forEach(f => {
-        const opt = document.createElement('option');
-        opt.value = f.food_id;
-        opt.text = `${f.food_name} (${f.region})`;
-        select.appendChild(opt);
-      });
-    } catch (e) {
-      select.innerHTML = `<option value="">Error loading foods</option>`;
-      document.getElementById('food-details').innerText = `Error fetching foods: ${e.message}`;
+    // --- EVENT LISTENERS ---
+    document.getElementById('analyze-btn').addEventListener('click', handleAnalysis);
+    
+    document.getElementById('clear-btn').addEventListener('click', () => {
+        document.getElementById('ingredients').value = '';
+        document.getElementById('imagePath').value = '';
+        document.getElementById('ai-details').hidden = true;
+        document.getElementById('empty-msg').hidden = false;
+        document.getElementById('empty-msg').innerText = "No results yet — enter data above and click Analyze.";
+    });
+
+    // --- DATABASE TOOLS (Keep existing logic) ---
+    async function fetchFoods() {
+        const select = document.getElementById('food-select');
+        const details = document.getElementById('food-details');
+        select.innerHTML = '<option value="">Loading…</option>';
+        details.innerText = 'Checking mock DB…';
+        try {
+            // Default to Mock Server on 3001. If user intentionally set the webhook to the mock server (contains 3001), use that base.
+            const webhookInput = document.getElementById('webhook-url');
+            let apiBase = 'http://localhost:3001';
+            if (webhookInput && webhookInput.value && webhookInput.value.includes('3001')) {
+                apiBase = webhookInput.value.replace(/\/webhook.*$/,'');
+            }
+            const url = `${apiBase}/db/foods`;
+            console.log('fetchFoods: requesting', url);
+
+            // Add a small timeout for the fetch so UI doesn't hang forever
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+            const resp = await fetch(url, { signal: controller.signal, mode: 'cors' });
+            clearTimeout(timeoutId);
+
+            if (!resp.ok) {
+                const txt = await resp.text().catch(() => '');
+                throw new Error(`HTTP ${resp.status}: ${txt || resp.statusText}`);
+            }
+
+            const foods = await resp.json();
+            select.innerHTML = '<option value="">— Select a food —</option>';
+            foods.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.food_id;
+                opt.text = `${f.food_name}`;
+                select.appendChild(opt);
+            });
+            details.innerText = '';
+        } catch (err) {
+            console.error('fetchFoods error:', err);
+            select.innerHTML = '<option>DB Offline (Port 3001)</option>';
+            if (err.name === 'AbortError') {
+                details.innerText = `Error fetching foods: request timed out (tried ${apiBase}/db/foods)`;
+            } else {
+                details.innerText = `Error fetching foods: ${err.message} (URL: ${apiBase}/db/foods)`;
+            }
+        }
     }
-  }
 
-  async function showFoodDetails(id) {
-    const details = document.getElementById('food-details');
-    if (!id) { details.innerText = 'Select a food to view details.'; return; }
-    details.innerText = 'Loading…';
-    try {
-      const webhookInput = document.getElementById('webhook-url');
-      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
-      const resp = await fetch(`${apiBase}/db/foods/${id}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const parts = [];
-      parts.push(`Name: ${data.food_name} (${data.region})`);
-      if (data.ingredients && data.ingredients.length) {
-        parts.push('\nIngredients:');
-        data.ingredients.forEach(i => parts.push(`- ${i.common_name} — ${i.impact_level}${i.reason ? `: ${i.reason}` : ''}`));
-      } else {
-        parts.push('\nNo ingredient data');
-      }
-      details.innerText = parts.join('\n');
-    } catch (err) {
-      details.innerText = `Error loading food: ${err.message}`;
-    }
-  }
 
-  document.getElementById('food-select').addEventListener('change', (e) => showFoodDetails(e.target.value));
-  document.getElementById('refresh-foods').addEventListener('click', fetchFoods);
-  document.getElementById('send-food-to-webhook').addEventListener('click', async () => {
-    const id = document.getElementById('food-select').value;
-    if (!id) return alert('Choose a food first');
-    try {
-      const webhookInput = document.getElementById('webhook-url');
-      const apiBase = webhookInput && webhookInput.value ? webhookInput.value.replace(/\/webhook.*$/,'') : 'http://localhost:3001';
-      const resp = await fetch(`${apiBase}/db/foods/${id}`);
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`HTTP ${resp.status}: ${text}`);
-      }
-      const contentType = resp.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await resp.text();
-        throw new Error(`Expected JSON response but got: ${text}`);
-      }
-      const data = await resp.json();
-      const ingredients = (data.ingredients || []).map(i => i.common_name).join(', ');
-      sendToN8n({ text: ingredients });
-    } catch (e) {
-      document.getElementById('output').innerText = `Error preparing webhook payload: ${e.message}`;
-    }
-  });
+    // DB item -> analyze (fills text and runs text-mode analysis)
+    document.getElementById('send-food-to-webhook').addEventListener('click', async () => {
+        const id = document.getElementById('food-select').value;
+        if (!id) return alert('Choose a food first');
+        try {
+            const webhookInput = document.getElementById('webhook-url');
+            // Default to mock DB on port 3001 unless the webhook URL explicitly points at 3001
+            let apiBase = 'http://localhost:3001';
+            if (webhookInput && webhookInput.value && webhookInput.value.includes('3001')) {
+                apiBase = webhookInput.value.replace(/\/webhook.*$/,'');
+            }
+            const resp = await fetch(`${apiBase}/db/foods/${id}`);
+            if (!resp.ok) { const text = await resp.text(); throw new Error(`HTTP ${resp.status}: ${text}`); }
+            const data = await resp.json();
+            const ingredients = (data.ingredients || []).map(i => i.common_name).join(', ');
+            document.getElementById('ingredients').value = ingredients;
+            currentMode = 'text';
+            handleAnalysis();
+        } catch (e) {
+            document.getElementById('food-details').innerText = `Error preparing webhook payload: ${e.message}`;
+        }
+    });
 
-  // Auto-send test button
-  document.getElementById('auto-send-btn').addEventListener('click', sendData);
+    // Auto-load DB on start
+    window.addEventListener('load', fetchFoods);
 
-  // Initialize on load
-  window.addEventListener('load', () => {
-    fetchFoods();
-  });
   </script>
-
-  <script src="script.js"></script>
 </body>
 </html>

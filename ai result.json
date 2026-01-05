@@ -1,0 +1,11 @@
+{
+  "report": {
+    "title": "Nutritionist AI Analysis",
+    "summary": "This meal looks balanced but contains high sodium.",
+    "ingredients": [
+      {"name": "White Bread", "risk": "Medium", "calories": 150},
+      {"name": "Processed Cheese", "risk": "High", "calories": 110}
+    ],
+    "recommendation": "Try swapping for whole-grain bread to lower the glycemic index."
+  }
+}
