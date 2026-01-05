@@ -192,9 +192,9 @@
                 const pathVal = document.getElementById('imagePath').value;
                 if (!pathVal) throw new Error("Please enter an image file path!");
 
-                // Default to Port 5678 (Real n8n) if no URL provided
-                // REPLACE THIS WITH YOUR ACTUAL N8N WEBHOOK TEST URL IF DIFFERENT
-                url = customWebhook || 'http://localhost:5678/webhook-test/your-webhook-id'; 
+                // Default to the running ngrok tunnel (public URL) if no custom webhook provided
+                // Replace with your own ngrok URL if it changes
+                url = customWebhook || 'https://fran-subphrenic-kemberly.ngrok-free.dev/webhook/scan-food';
                 
                 payload = {
                     image_path: pathVal,
